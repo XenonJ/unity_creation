@@ -6,19 +6,19 @@ public class Voxelizer : MonoBehaviour
 {
     [Header("Compute Shader & 源 Mesh")]
     public ComputeShader voxelCompute;
-    public MeshFilter     sourceMeshFilter;  // 如果挂在同一个物体上，可留空
+    public MeshFilter sourceMeshFilter;  // 如果挂在同一个物体上，可留空
 
     [Header("体素分辨率")]
-    public Vector3Int splitCount = new Vector3Int(32, 32, 32);
+    public Vector3Int splitCount = new(32, 32, 32);
 
     [Header("实例化设置")]
-    public Mesh     instanceMesh;
-    public Material instanceMaterial;        // 勾选 Enable GPU Instancing
-    public Color    voxelColor = Color.white;
+    public Mesh instanceMesh;
+    public Material instanceMaterial;
+    public Color voxelColor = Color.white;
 
     [Header("实例缩放模式")]
-    public bool    autoScale    = true;               // true → 按 AABB/分辨率自动算
-    public Vector3 manualScale  = Vector3.one * 0.9f; // 或者手动指定
+    public bool autoScale = true;                       // true → 按 AABB/分辨率自动算
+    public Vector3 manualScale = Vector3.one * 0.9f;    // 或者手动指定
 
     // 运行时用的最终缩放
     Vector3 instanceScale;
@@ -38,11 +38,11 @@ public class Voxelizer : MonoBehaviour
     void Start()
     {
         // 1) 拆三角形数据到 StructuredBuffer
-        var mesh    = sourceMeshFilter != null 
-                        ? sourceMeshFilter.sharedMesh 
+        var mesh = sourceMeshFilter != null
+                        ? sourceMeshFilter.sharedMesh
                         : GetComponent<MeshFilter>().sharedMesh;
-        var verts   = mesh.vertices;
-        var inds    = mesh.triangles;
+        var verts = mesh.vertices;
+        var inds = mesh.triangles;
         int triCount = inds.Length / 3;
 
         // 展开顶点数组
@@ -54,23 +54,23 @@ public class Voxelizer : MonoBehaviour
         triBuffer.SetData(triVerts);
 
         // 2) 创建投影 & 体素 RWTexture
-        projYZ    = NewRWTexture2D(splitCount.y, splitCount.z);
-        projXZ    = NewRWTexture2D(splitCount.x, splitCount.z);
-        projXY    = NewRWTexture2D(splitCount.x, splitCount.y);
+        projYZ = NewRWTexture2D(splitCount.y, splitCount.z);
+        projXZ = NewRWTexture2D(splitCount.x, splitCount.z);
+        projXY = NewRWTexture2D(splitCount.x, splitCount.y);
         volumeTex = NewRWTexture3D(splitCount.x, splitCount.y, splitCount.z);
 
         // 3) 找 Kernels 并绑定 Buffer/Texture
-        kernelClear   = voxelCompute.FindKernel("CS_Clear");
-        kernelX       = voxelCompute.FindKernel("CS_ProjectX");
-        kernelY       = voxelCompute.FindKernel("CS_ProjectY");
-        kernelZ       = voxelCompute.FindKernel("CS_ProjectZ");
+        kernelClear = voxelCompute.FindKernel("CS_Clear");
+        kernelX = voxelCompute.FindKernel("CS_ProjectX");
+        kernelY = voxelCompute.FindKernel("CS_ProjectY");
+        kernelZ = voxelCompute.FindKernel("CS_ProjectZ");
         kernelCombine = voxelCompute.FindKernel("CS_Combine");
 
         // 三角 Buffer 绑定到投影 Kernels
         voxelCompute.SetBuffer(kernelX, "_TriangleVerts", triBuffer);
         voxelCompute.SetBuffer(kernelY, "_TriangleVerts", triBuffer);
         voxelCompute.SetBuffer(kernelZ, "_TriangleVerts", triBuffer);
-        voxelCompute.SetInt   ("_TriangleCount", triCount);
+        voxelCompute.SetInt("_TriangleCount", triCount);
 
         // Clear Kernel 绑定所有 RWTexture
         voxelCompute.SetTexture(kernelClear, "_Volume", volumeTex);
@@ -111,18 +111,18 @@ public class Voxelizer : MonoBehaviour
             sizeof(uint) * 5,
             ComputeBufferType.IndirectArguments
         );
-        uint idxCount   = (uint)instanceMesh.GetIndexCount(0);
+        uint idxCount = (uint)instanceMesh.GetIndexCount(0);
         uint startIndex = (uint)instanceMesh.GetIndexStart(0);
         uint baseVertex = (uint)instanceMesh.GetBaseVertex(0);
         // argsBuffer 格式： [indexCount, instanceCount, startIndex, baseVertex, 0]
-        argsBuffer.SetData(new uint[]{ idxCount, 0, startIndex, baseVertex, 0 });
+        argsBuffer.SetData(new uint[] { idxCount, 0, startIndex, baseVertex, 0 });
 
         // 5) Dispatch ComputeShader（一次性体素化）
         int tx = Mathf.CeilToInt(splitCount.x / 8f);
         int ty = Mathf.CeilToInt(splitCount.y / 8f);
         int tz = Mathf.CeilToInt(splitCount.z / 8f);
 
-        voxelCompute.Dispatch(kernelClear,   tx, ty, tz);
+        voxelCompute.Dispatch(kernelClear, tx, ty, tz);
         voxelCompute.Dispatch(kernelX,
             Mathf.CeilToInt(splitCount.y / 8f),
             Mathf.CeilToInt(splitCount.z / 8f), 1);
@@ -140,7 +140,7 @@ public class Voxelizer : MonoBehaviour
         AsyncGPUReadback.Request(argsBuffer, req =>
         {
             if (req.hasError) Debug.LogError("Voxelizer 回读错误");
-            else             isCompleted = true;
+            else isCompleted = true;
         });
 
         // —— 计算 instanceScale ——  
@@ -160,7 +160,7 @@ public class Voxelizer : MonoBehaviour
 
         // 7) 计算 world 空间下的包围盒（用于渲染剔除）
         var worldCenter = transform.TransformPoint(bounds.center);
-        var worldSize   = Vector3.Scale(bounds.size, transform.lossyScale);
+        var worldSize = Vector3.Scale(bounds.size, transform.lossyScale);
         drawBounds = new Bounds(worldCenter, worldSize);
 
         // 8) 材质属性块（用于绑定 ComputeBuffer）
@@ -179,8 +179,8 @@ public class Voxelizer : MonoBehaviour
         // —— 绑定体素中心列表 & 颜色 & 缩放 ——  
         mpb.Clear();
         mpb.SetBuffer("_VoxelPositions", voxelPosBuffer);
-        mpb.SetColor ("_Color",            voxelColor);
-        mpb.SetVector("_InstanceScale",    instanceScale);
+        mpb.SetColor("_Color", voxelColor);
+        mpb.SetVector("_InstanceScale", instanceScale);
 
         // —— 间接实例化绘制 ——  
         Graphics.DrawMeshInstancedIndirect(
@@ -210,7 +210,7 @@ public class Voxelizer : MonoBehaviour
     {
         var rt = new RenderTexture(w, h, 0,
             RenderTextureFormat.RInt, RenderTextureReadWrite.Linear);
-        rt.dimension         = TextureDimension.Tex2D;
+        rt.dimension = TextureDimension.Tex2D;
         rt.enableRandomWrite = true;
         rt.Create();
         return rt;
@@ -221,8 +221,8 @@ public class Voxelizer : MonoBehaviour
     {
         var rt = new RenderTexture(w, h, 0,
             RenderTextureFormat.R8, RenderTextureReadWrite.Linear);
-        rt.dimension         = TextureDimension.Tex3D;
-        rt.volumeDepth       = d;
+        rt.dimension = TextureDimension.Tex3D;
+        rt.volumeDepth = d;
         rt.enableRandomWrite = true;
         rt.Create();
         return rt;
