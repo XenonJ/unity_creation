@@ -204,6 +204,7 @@ public class Voxelizer : MonoBehaviour
         mpb.SetBuffer("_VoxelPositions", voxelPosBuffer);
         mpb.SetColor("_Color", voxelColor);
         mpb.SetVector("_InstanceScale", instanceScale);
+        mpb.SetMatrix("_LocalToWorld", transform.localToWorldMatrix);
         Graphics.DrawMeshInstancedIndirect(
             instanceMesh, 0,
             instanceMaterial,

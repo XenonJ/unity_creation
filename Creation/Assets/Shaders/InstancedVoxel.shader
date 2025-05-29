@@ -20,10 +20,11 @@ Shader "Custom/InstancedVoxel"
 
             // 体素中心列表，由脚本绑定
             StructuredBuffer<float3> _VoxelPositions;
-
             // 实例化统一属性
             float4 _Color;
             float3 _InstanceScale;
+            // 本地→世界矩阵
+            float4x4 _LocalToWorld;
 
             struct appdata
             {
@@ -33,23 +34,27 @@ Shader "Custom/InstancedVoxel"
 
             struct v2f
             {
-                float4 pos : SV_POSITION;
+                float4 pos        : SV_POSITION;
                 uint   instanceID : SV_InstanceID;
             };
 
             v2f vert(appdata v)
             {
                 v2f o;
-                // 从 Buffer 取出这个实例的中心（局部空间）
+
+                // 1) 取出这个实例在本地空间的中心
                 float3 center = _VoxelPositions[v.instanceID];
 
-                // 缩放立方体顶点
+                // 2) 按 _InstanceScale 缩放立方体顶点
                 float3 scaledVertex = v.vertex * _InstanceScale;
 
-                // 先 Object→World，再平移到 center（局部）→得到世界坐标
-                float4 worldPos = mul(unity_ObjectToWorld, float4(scaledVertex, 1));
-                worldPos.xyz += center;
+                // 3) 在本地空间加上中心偏移
+                float4 localPos = float4(scaledVertex + center, 1);
 
+                // 4) 用我们传进来的 _LocalToWorld 矩阵把它变换到世界空间
+                float4 worldPos = mul(_LocalToWorld, localPos);
+
+                // 5) 最后投影到裁剪空间
                 o.pos = UnityWorldToClipPos(worldPos);
                 o.instanceID = v.instanceID;
                 return o;
@@ -62,8 +67,6 @@ Shader "Custom/InstancedVoxel"
                 float g = frac(i.instanceID * 0.567f);
                 float b = frac(i.instanceID * 0.789f);
                 float4 randCol = float4(r, g, b, 1);
-
-                // 最终颜色 = 随机色 × BaseTint
                 return randCol * _Color;
             }
             ENDCG
