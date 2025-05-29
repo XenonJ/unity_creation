@@ -4,14 +4,16 @@ Shader "Custom/InstancedVoxel"
     {
         _Color           ("Voxel Color",     Color)  = (1,1,1,1)
         _InstanceScale   ("Instance Scale",  Vector) = (1,1,1,0)
+        _InstanceStep    ("Instance Step",   Int)  = 0
     }
     SubShader
     {
-        Tags { "RenderType"="Opaque" }
         LOD 100
 
         Pass
         {
+            ZWrite On
+
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
@@ -25,6 +27,8 @@ Shader "Custom/InstancedVoxel"
             float3 _InstanceScale;
             // 本地→世界矩阵
             float4x4 _LocalToWorld;
+            // 实例化进度
+            int _InstanceStep;
 
             struct appdata
             {
@@ -62,6 +66,8 @@ Shader "Custom/InstancedVoxel"
 
             fixed4 frag(v2f i) : SV_Target
             {
+                if (i.instanceID >= _InstanceStep)
+                    discard; // 如果实例ID超过步数则丢弃
                 // 根据 instanceID 生成伪随机 RGB
                 float r = frac(i.instanceID * 0.345f);
                 float g = frac(i.instanceID * 0.567f);

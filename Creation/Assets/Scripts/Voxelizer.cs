@@ -20,7 +20,12 @@ public class Voxelizer : MonoBehaviour
     public Material instanceMaterial;
     public Color voxelColor = Color.white;
 
-    [HideInInspector] public bool isCompleted = false;
+    [Header("运行时状态")]
+    public int instanceStep = 0;
+    public int animSpeed = 1;
+
+    [HideInInspector] public bool voxelRender = false;
+    [HideInInspector] public bool animCompleted = false; // 实例数量
 
     // 私有 GPU 资源
     private RenderTexture projYZ, projXZ, projXY, volumeTex;
@@ -43,8 +48,24 @@ public class Voxelizer : MonoBehaviour
 
     void Update()
     {
-        if (isCompleted)
+        if (voxelRender)
+        {
+            instanceStep += animSpeed;
+            if (instanceStep >= splitCount.x * splitCount.y * splitCount.z)
+            {
+                instanceStep = 0;
+                animCompleted = true; // 动画完成标志
+                voxelRender = false; // 重置渲染状态
+            }
             RenderVoxels();           // 绘制实例
+        }
+        if (animCompleted && !gameObject.GetComponent<MeshRenderer>().enabled)
+        {
+            // 如果动画完成，可以在这里添加其他逻辑
+            Debug.Log("Voxelization 动画已完成");
+            gameObject.GetComponent<MeshRenderer>().enabled = true; // 启用 MeshRenderer
+            gameObject.GetComponent<Voxelizer>().enabled = false; // 禁用 Voxelizer
+        }
     }
 
     void OnDisable()
@@ -172,11 +193,11 @@ public class Voxelizer : MonoBehaviour
         voxelCompute.Dispatch(kernelCombine, tx, ty, tz);
 
         ComputeBuffer.CopyCount(voxelPosBuffer, argsBuffer, sizeof(uint));
-        isCompleted = false;
+        voxelRender = false;
         AsyncGPUReadback.Request(argsBuffer, req =>
         {
             if (req.hasError) Debug.LogError("Voxelizer 回读错误");
-            else isCompleted = true;
+            else voxelRender = true;
         });
     }
 
@@ -205,6 +226,7 @@ public class Voxelizer : MonoBehaviour
         mpb.SetColor("_Color", voxelColor);
         mpb.SetVector("_InstanceScale", instanceScale);
         mpb.SetMatrix("_LocalToWorld", transform.localToWorldMatrix);
+        mpb.SetInt("_InstanceStep", instanceStep);
         Graphics.DrawMeshInstancedIndirect(
             instanceMesh, 0,
             instanceMaterial,
