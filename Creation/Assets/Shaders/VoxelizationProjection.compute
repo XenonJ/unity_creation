@@ -6,6 +6,7 @@
 #pragma kernel CS_ProjectY
 #pragma kernel CS_ProjectZ
 #pragma kernel CS_Combine
+#pragma kernel CS_Reorder
 
 // 三角形顶点数据，每三个 float3 为一三角形
 StructuredBuffer<float3> _TriangleVerts;
@@ -14,7 +15,7 @@ uint _TriangleCount;
 // AABB 范围和体素分辨率
 float3 _AABBMin;
 float3 _AABBMax;
-int3 _SplitCount;    // {Nx, Ny, Nz}
+uint3 _SplitCount;    // {Nx, Ny, Nz}
 
 // 投影图：0/1 标记
 RWTexture2D<uint> _ProjYZ;  // 大小 Ny×Nz
@@ -146,11 +147,28 @@ void CS_Combine(uint3 id : SV_DispatchThreadID)
     uint alive = pX & pY & pZ;
 
     _Volume[id] = alive;
-    if (alive != 0)
+}
+
+// 重新排序体素id
+[numthreads(1,1,1)]
+void CS_Reorder(uint3 id : SV_DispatchThreadID)
+{
+    for (uint y = 0; y < _SplitCount.y; ++y)
+    for (uint x = _SplitCount.x / 2; x < _SplitCount.x; ++x)
+    for (uint z = 0; z < _SplitCount.z; ++z)
     {
-        // 计算当前体素中心的世界坐标
-        float3 gridUV = (float3(id) + 0.5) / _SplitCount;
-        float3 worldPos = lerp(_AABBMin, _AABBMax, gridUV);
-        _VoxelPositions.Append(worldPos);
+        uint nx = _SplitCount.x - x;
+        if (_Volume[int3(x,y,z)] != 0)
+        {
+            float3 gridUV  = (float3(x,y,z) + 0.5) / _SplitCount;
+            float3 worldPos  = lerp(_AABBMin, _AABBMax, gridUV);
+            _VoxelPositions.Append(worldPos);
+        }
+        if (_Volume[int3(nx,y,z)] != 0)
+        {
+            float3 gridUV  = (float3(nx,y,z) + 0.5) / _SplitCount;
+            float3 worldPos  = lerp(_AABBMin, _AABBMax, gridUV);
+            _VoxelPositions.Append(worldPos);
+        }
     }
 }

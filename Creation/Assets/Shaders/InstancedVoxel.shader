@@ -74,6 +74,7 @@ Shader "Custom/InstancedVoxel"
                 float b = frac(i.instanceID * 0.789f);
                 float4 randCol = float4(r, g, b, 1);
                 return randCol * _Color;
+                // return _Color; // 使用统一颜色
             }
             ENDCG
         }
