@@ -12,13 +12,16 @@ Shader "Custom/InstancedVoxel"
 
         Pass
         {
+            // Tags { "LightMode"="ForwardBase" }
             ZWrite On
 
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma target 3.0
+            #pragma target 4.5
+            #pragma multi_compile_fwdbase
             #include "UnityCG.cginc"
+            #include "Lighting.cginc"
 
             // 体素中心列表，由脚本绑定
             StructuredBuffer<float3> _VoxelPositions;
@@ -28,18 +31,20 @@ Shader "Custom/InstancedVoxel"
             // 本地→世界矩阵
             float4x4 _LocalToWorld;
             // 实例化进度
-            int _InstanceStep;
+            uint _InstanceStep;
 
             struct appdata
             {
                 float3 vertex     : POSITION;
+                float3 normal     : NORMAL;
                 uint   instanceID : SV_InstanceID;
             };
 
             struct v2f
             {
                 float4 pos        : SV_POSITION;
-                uint   instanceID : SV_InstanceID;
+                float3 normal     : TEXCOORD0;
+                uint   instanceID : TEXCOORD1;
             };
 
             v2f vert(appdata v)
@@ -58,6 +63,9 @@ Shader "Custom/InstancedVoxel"
                 // 4) 用我们传进来的 _LocalToWorld 矩阵把它变换到世界空间
                 float4 worldPos = mul(_LocalToWorld, localPos);
 
+                // 4.5) 计算法线
+                o.normal = normalize(mul((float3x3)_LocalToWorld, v.normal));
+
                 // 5) 最后投影到裁剪空间
                 o.pos = UnityWorldToClipPos(worldPos);
                 o.instanceID = v.instanceID;
@@ -66,16 +74,34 @@ Shader "Custom/InstancedVoxel"
 
             fixed4 frag(v2f i) : SV_Target
             {
+                // 根据进度丢弃
                 if (i.instanceID >= _InstanceStep)
-                    discard; // 如果实例ID超过步数则丢弃
-                // 根据 instanceID 生成伪随机 RGB
-                float r = frac(i.instanceID * 0.345f);
-                float g = frac(i.instanceID * 0.567f);
-                float b = frac(i.instanceID * 0.789f);
-                float4 randCol = float4(r, g, b, 1);
-                return randCol * _Color;
+                    discard;
+
+                // 1) 随机色
+                float3 randCol = float3(
+                    frac(i.instanceID * 0.345f),
+                    frac(i.instanceID * 0.567f),
+                    frac(i.instanceID * 0.789f)
+                );
+                float3 baseCol = randCol * _Color.rgb;
+
+                // 2) 环境光
+                float3 ambient = UNITY_LIGHTMODEL_AMBIENT.xyz;
+
+                // 3) 主定向光漫反射
+                float3 N = normalize(i.normal);
+                float3 L = normalize(_WorldSpaceLightPos0.xyz);
+                float  lambert = saturate(dot(N, L));
+                float3 diff = lambert * _LightColor0.rgb;
+
+                // 4) 合成
+                float3 final = baseCol * (ambient + diff);
+
+                return float4(final, _Color.a);
             }
             ENDCG
         }
     }
+    FallBack "Diffuse"
 }

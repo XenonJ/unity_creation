@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -21,8 +22,9 @@ public class Voxelizer : MonoBehaviour
     public Color voxelColor = Color.white;
 
     [Header("运行时状态")]
-    public int instanceStep = 0;
-    public int animSpeed = 1;
+    public float instanceStep = 0.0f;
+    public float animSpeed = 1.0f;
+    public float animDelay = 0.0f;
 
     [HideInInspector] public bool voxelRender = false;
     [HideInInspector] public bool animCompleted = false; // 实例数量
@@ -30,9 +32,10 @@ public class Voxelizer : MonoBehaviour
     // 私有 GPU 资源
     private RenderTexture projYZ, projXZ, projXY, volumeTex;
     private ComputeBuffer triBuffer, voxelPosBuffer, argsBuffer;
-    private int kernelClear, kernelX, kernelY, kernelZ, kernelCombine;
+    private int kernelClear, kernelX, kernelY, kernelZ, kernelCombine, kernelReorder;
     private Bounds drawBounds;
     private MaterialPropertyBlock mpb;
+    private int voxelCount = 0; // 用于存储有效体素数
 
     void Start()
     {
@@ -50,8 +53,8 @@ public class Voxelizer : MonoBehaviour
     {
         if (voxelRender)
         {
-            instanceStep += animSpeed;
-            if (instanceStep >= splitCount.x * splitCount.y * splitCount.z)
+            instanceStep += (float)animSpeed * Time.deltaTime * 10.0f;
+            if (instanceStep >= voxelCount + animDelay * 10.0f)
             {
                 instanceStep = 0;
                 animCompleted = true; // 动画完成标志
@@ -80,7 +83,7 @@ public class Voxelizer : MonoBehaviour
                     ? sourceMeshFilter.sharedMesh
                     : GetComponent<MeshFilter>().sharedMesh;
         var verts = mesh.vertices;
-        var inds  = mesh.triangles;
+        var inds = mesh.triangles;
         int triCount = inds.Length / 3;
         Vector3[] triVerts = new Vector3[inds.Length];
         for (int i = 0; i < inds.Length; i++)
@@ -111,20 +114,21 @@ public class Voxelizer : MonoBehaviour
     // 创建投影 & 体素 RWTexture
     void CreateTextures()
     {
-        projYZ    = NewRWTexture2D(splitCount.y, splitCount.z);
-        projXZ    = NewRWTexture2D(splitCount.x, splitCount.z);
-        projXY    = NewRWTexture2D(splitCount.x, splitCount.y);
-        volumeTex = NewRWTexture3D(splitCount.x, splitCount.y, splitCount.z);
+        projYZ = NewRWTexture2D(splitCount.y, splitCount.z);
+        projXZ = NewRWTexture2D(splitCount.x, splitCount.z);
+        projXY = NewRWTexture2D(splitCount.x, splitCount.y);
+        volumeTex = NewRWTexture3D_Int(splitCount.x, splitCount.y, splitCount.z);
     }
 
     // 找 Kernels 并绑定 Buffer/Texture
     void BindKernelsAndResources()
     {
-        kernelClear   = voxelCompute.FindKernel("CS_Clear");
-        kernelX       = voxelCompute.FindKernel("CS_ProjectX");
-        kernelY       = voxelCompute.FindKernel("CS_ProjectY");
-        kernelZ       = voxelCompute.FindKernel("CS_ProjectZ");
+        kernelClear = voxelCompute.FindKernel("CS_Clear");
+        kernelX = voxelCompute.FindKernel("CS_ProjectX");
+        kernelY = voxelCompute.FindKernel("CS_ProjectY");
+        kernelZ = voxelCompute.FindKernel("CS_ProjectZ");
         kernelCombine = voxelCompute.FindKernel("CS_Combine");
+        kernelReorder = voxelCompute.FindKernel("CS_Reorder");
 
         voxelCompute.SetBuffer(kernelX, "_TriangleVerts", triBuffer);
         voxelCompute.SetBuffer(kernelY, "_TriangleVerts", triBuffer);
@@ -140,6 +144,7 @@ public class Voxelizer : MonoBehaviour
         voxelCompute.SetTexture(kernelCombine, "_ProjYZ", projYZ);
         voxelCompute.SetTexture(kernelCombine, "_ProjXZ", projXZ);
         voxelCompute.SetTexture(kernelCombine, "_ProjXY", projXY);
+        voxelCompute.SetTexture(kernelReorder, "_Volume", volumeTex);
 
         var bounds = (sourceMeshFilter != null
                         ? sourceMeshFilter.sharedMesh
@@ -160,14 +165,14 @@ public class Voxelizer : MonoBehaviour
             ComputeBufferType.Append
         );
         voxelPosBuffer.SetCounterValue(0);
-        voxelCompute.SetBuffer(kernelCombine, "_VoxelPositions", voxelPosBuffer);
+        voxelCompute.SetBuffer(kernelReorder, "_VoxelPositions", voxelPosBuffer);
 
         argsBuffer = new ComputeBuffer(
             1,
             sizeof(uint) * 5,
             ComputeBufferType.IndirectArguments
         );
-        uint idxCount   = (uint)instanceMesh.GetIndexCount(0);
+        uint idxCount = (uint)instanceMesh.GetIndexCount(0);
         uint startIndex = (uint)instanceMesh.GetIndexStart(0);
         uint baseVertex = (uint)instanceMesh.GetBaseVertex(0);
         argsBuffer.SetData(new uint[] { idxCount, 0, startIndex, baseVertex, 0 });
@@ -191,13 +196,25 @@ public class Voxelizer : MonoBehaviour
             Mathf.CeilToInt(splitCount.x / 8f),
             Mathf.CeilToInt(splitCount.y / 8f), 1);
         voxelCompute.Dispatch(kernelCombine, tx, ty, tz);
+        voxelCompute.Dispatch(kernelReorder, 1, 1, 1);
 
         ComputeBuffer.CopyCount(voxelPosBuffer, argsBuffer, sizeof(uint));
         voxelRender = false;
         AsyncGPUReadback.Request(argsBuffer, req =>
         {
             if (req.hasError) Debug.LogError("Voxelizer 回读错误");
-            else voxelRender = true;
+            else
+            {
+                var data = req.GetData<uint>().ToArray();
+                uint indexCount = data[0];
+                uint aliveVoxelCnt = data[1];
+                uint startIndex = data[2];
+                uint baseVertex = data[3];
+                Debug.Log($"活跃体素数 = {aliveVoxelCnt}");
+                voxelCount = (int)aliveVoxelCnt;
+
+                voxelRender = true;
+            }
         });
     }
 
@@ -208,7 +225,7 @@ public class Voxelizer : MonoBehaviour
                         ? sourceMeshFilter.sharedMesh
                         : GetComponent<MeshFilter>().sharedMesh).bounds;
         var worldCenter = transform.TransformPoint(bounds.center);
-        var worldSize   = Vector3.Scale(bounds.size, transform.lossyScale);
+        var worldSize = Vector3.Scale(bounds.size, transform.lossyScale);
         drawBounds = new Bounds(worldCenter, worldSize);
     }
 
@@ -226,7 +243,7 @@ public class Voxelizer : MonoBehaviour
         mpb.SetColor("_Color", voxelColor);
         mpb.SetVector("_InstanceScale", instanceScale);
         mpb.SetMatrix("_LocalToWorld", transform.localToWorldMatrix);
-        mpb.SetInt("_InstanceStep", instanceStep);
+        mpb.SetInt("_InstanceStep", (int)instanceStep);
         Graphics.DrawMeshInstancedIndirect(
             instanceMesh, 0,
             instanceMaterial,
@@ -267,6 +284,21 @@ public class Voxelizer : MonoBehaviour
     {
         var rt = new RenderTexture(w, h, 0,
             RenderTextureFormat.R8, RenderTextureReadWrite.Linear)
+        {
+            dimension = TextureDimension.Tex3D,
+            volumeDepth = d,
+            enableRandomWrite = true
+        };
+        rt.Create();
+        return rt;
+    }
+    
+    // Helper: 创建可写 RWTexture3D（整数格式）
+    RenderTexture NewRWTexture3D_Int(int w, int h, int d)
+    {
+        var rt = new RenderTexture(w, h, 0,
+            RenderTextureFormat.RInt,
+            RenderTextureReadWrite.Linear)
         {
             dimension = TextureDimension.Tex3D,
             volumeDepth = d,
