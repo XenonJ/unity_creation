@@ -250,7 +250,9 @@ public class Voxelizer : MonoBehaviour
             drawBounds,
             argsBuffer,
             0,
-            mpb
+            mpb,
+            ShadowCastingMode.Off,
+            false
         );
     }
 
