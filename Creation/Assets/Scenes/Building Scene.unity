@@ -227,9 +227,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ae13d1307faac45f5ac63ee2e2410dbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  buildingPrefab: {fileID: 7256723651236779773, guid: 4dae0d8289e2144c6a4305b5d61aa357, type: 3}
+  buildingPrefab: {fileID: 3035967821325264310, guid: de09c63960dfd435fab2c27c8a9ddf1a, type: 3}
   ground: {fileID: 0}
-  buildingPreviewPrefab: {fileID: 5347987717151329491, guid: 0f6b42f867bf84bc9835b08b371b9299, type: 3}
+  buildingPreviewPrefab: {fileID: 1640908652775104, guid: cd87e5026d1695148aabe96121c526ef, type: 3}
   buildingInfoText: {fileID: 956549641}
   isBuildingActive: 0
 --- !u!4 &721801131
